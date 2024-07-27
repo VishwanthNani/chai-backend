@@ -4,6 +4,21 @@ import { User } from "../models/user.model.js"
 import {uploadOnCloudinary} from "../utils/cloudinary.js"
 import {ApiResponse} from "../utils/apiResponse.js"
 
+
+const generateAccessAndRefreshToken=async(user_id)=>{
+    try {
+        const user=User.findById(user_id)
+        const accessToken=user.generateAccessToken()
+        const refreshToken=user.generateRefreshToken()
+        user.refreshToken=refreshToken
+        user.save({validateBeforeSave:false})
+    
+        return {accessToken,refreshToken}
+    } catch (error) {
+        throw new ApiError(500,"Something went wrong while generating Access and Refresh Tokens")
+    }
+}
+
 const registerUser=asyncHandler(async(req,res)=>{
     //take inputs from frontend
     const {userName,email,fullName,password}=req.body
@@ -60,5 +75,45 @@ const registerUser=asyncHandler(async(req,res)=>{
     )
 })
 
+const loginUser=asyncHandler(async(req,res)=>{
+    //get data from req
+    const {userName,password,email}=req.body
+    //validate data username or email
+    if(!(userName||email))
+    {
+        throw new ApiError(400,"username or password is required")
+    }
+    //find the user
+    const user=await User.findOne({$or:[{userName,email}]})
+    if(!user)
+    {
+        throw new ApiError(401,"User not registered,register to continue")
+    }
+    //check password
+    const isPasswordValid=user.isPasswordCorrect(password)
+    if(!isPasswordValid)
+    {
+        throw new ApiError(401,"Password Incorrect,Enter correct password")
+    }
+    //generate refresh and access tokens
+    const {accessToken,refreshToken}=generateAccessAndRefreshToken(user._id)
+    //send cookies
+    const loggedInUser=User.findById(user._id).select("-password -refreshToken")
+    const options=
+    {
+        httpOnly:true,
+        secure:true
+    }
 
-export default registerUser
+    return res
+    .status(200)
+    .cookie("refreshToken",refreshToken,options)
+    .cookie("accessToken",accessToken,options)
+    .json(
+        new ApiResponse(200,{user:loggedInUser,refreshToken,accessToken},"Successfully logged in")
+    )
+})
+
+export  {
+    registerUser
+}
